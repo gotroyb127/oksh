@@ -33,6 +33,9 @@ struct edstate {
 	int	cursor;		/* byte# in cbuf having the cursor */
 };
 
+#define SET_EXTERNAL_CURSOR	setinsert(0)
+static int	setinsert(int);
+static void	setcursor(void);
 
 static int	vi_hook(int);
 static void	vi_reset(char *, size_t);
@@ -202,6 +205,7 @@ x_vi(char *buf, size_t len)
 
 	vi_reset(buf, len > LINE ? LINE : len);
 	vi_pprompt(1);
+	setcursor();
 	x_flush();
 	while (1) {
 		if (macro.p) {
@@ -242,6 +246,7 @@ x_vi(char *buf, size_t len)
 		x_flush();
 	}
 
+	SET_EXTERNAL_CURSOR;
 	x_putc('\r'); x_putc('\n'); x_flush();
 
 	if (c == -1 || len <= (size_t)es->linelen)
@@ -525,7 +530,7 @@ vi_reset(char *buf, size_t len)
 {
 	state = VNORMAL;
 	ohnum = hnum = hlast = histnum(-1) + 1;
-	insert = INSERT;
+	setinsert(INSERT);
 	saved_inslen = inslen;
 	first_insert = 1;
 	inslen = 0;
@@ -771,21 +776,21 @@ vi_cmd(int argcnt, const char *cmd)
 			if (es->linelen != 0)
 				while (isu8cont(es->cbuf[++es->cursor]))
 					continue;
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'A':
 			modified = 1; hnum = hlast;
 			del_range(0, 0);
 			es->cursor = es->linelen;
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'S':
 			es->cursor = domove(1, "^", 1);
 			del_range(es->cursor, es->linelen);
 			modified = 1; hnum = hlast;
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'Y':
@@ -828,7 +833,7 @@ vi_cmd(int argcnt, const char *cmd)
 			}
 			if (*cmd == 'c') {
 				modified = 1; hnum = hlast;
-				insert = INSERT;
+				setinsert(INSERT);
 			}
 			break;
 
@@ -858,7 +863,7 @@ vi_cmd(int argcnt, const char *cmd)
 		case 'C':
 			modified = 1; hnum = hlast;
 			del_range(es->cursor, es->linelen);
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'D':
@@ -887,13 +892,13 @@ vi_cmd(int argcnt, const char *cmd)
 
 		case 'i':
 			modified = 1; hnum = hlast;
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'I':
 			modified = 1; hnum = hlast;
 			es->cursor = domove(1, "^", 1);
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'j':
@@ -948,7 +953,7 @@ vi_cmd(int argcnt, const char *cmd)
 
 		case 'R':
 			modified = 1; hnum = hlast;
-			insert = REPLACE;
+			setinsert(REPLACE);
 			break;
 
 		case 's':
@@ -960,7 +965,7 @@ vi_cmd(int argcnt, const char *cmd)
 					if (argcnt-- == 0)
 						break;
 			del_range(es->cursor, cur);
-			insert = INSERT;
+			setinsert(INSERT);
 			break;
 
 		case 'v':
@@ -1104,7 +1109,7 @@ vi_cmd(int argcnt, const char *cmd)
 					es->cursor--;
 				return -1;
 			}
-			insert = INSERT;
+			setinsert(INSERT);
 			}
 			break;
 
@@ -1314,7 +1319,7 @@ redo_insert(int count)
 	if (es->cursor > 0)
 		while (isu8cont(es->cbuf[--es->cursor]))
 			continue;
-	insert = 0;
+	setinsert(0);
 	return 0;
 }
 
@@ -2063,7 +2068,7 @@ expand_word(int command)
 	if (rval == 0 && i > 0)
 		es->cursor += i;
 	modified = 1; hnum = hlast;
-	insert = INSERT;
+	setinsert(INSERT);
 	lastac = 0;
 	refresh_line(0);
 	return rval;
@@ -2167,7 +2172,7 @@ complete_word(int command, int count)
 	x_free_words(nwords, words);
 
 	modified = 1; hnum = hlast;
-	insert = INSERT;
+	setinsert(INSERT);
 	lastac = 0;	 /* prevent this from being redone... */
 	refresh_line(0);
 
@@ -2257,5 +2262,32 @@ static int
 isu8cont(unsigned char c)
 {
 	return !Flag(FVISHOW8) && (c & (0x80 | 0x40)) == 0x80;
+}
+
+static int
+setinsert(int n)
+{
+	insert = n;
+	setcursor();
+	return n;
+}
+
+static void
+setcursor(void)
+{
+	int i;
+
+	switch (insert) {
+	case INSERT:
+		i = 6;
+		break;
+	case REPLACE:
+		i = 4;
+		break;
+	default:
+		i = 2;
+	}
+	char s[] = {'\033', '[', '0'+i, ' ', 'q', '\0'};
+	x_puts(s);
 }
 #endif	/* VI */
